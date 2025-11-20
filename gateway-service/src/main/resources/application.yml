@@ -1,0 +1,101 @@
+server:
+  port: 8080
+
+spring:
+  main:
+    web-application-type: reactive
+
+  application:
+    name: gateway-service
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: localhost:8848
+        username: nacos
+        password: nacos
+        namespace: tushuguan
+        naming-load-cache-at-start: true
+
+    sentinel:
+      transport:
+        dashboard: localhost:8080
+        port: 8719
+
+    gateway:
+      globalcors:
+        add-to-simple-url-handler-mapping: true
+        corsConfigurations:
+          '[/**]':
+            allowedOrigins:
+              - http://localhost:9527
+              - http://localhost:8080
+              - http://127.0.0.1:8080
+            allowedMethods: "*"
+            allowedHeaders: "*"
+            allowCredentials: true
+
+      routes:
+        # 房间服务 Swagger 文档
+        - id: room-service-swagger
+          uri: lb://room-service
+          predicates:
+            - Path=/room/v3/api-docs
+            - Path=/room/v3/api-docs/**
+          filters:
+            - StripPrefix=1
+
+        # 预约服务 Swagger 文档
+        - id: reservation-service-swagger
+          uri: lb://reservation-service
+          predicates:
+            - Path=/reservation/v3/api-docs/**
+          filters:
+            - StripPrefix=1
+        # ========== 用户服务业务接口（不再 StripPrefix） ==========
+        - id: user-service-auth
+          uri: lb://user-service
+          predicates:
+            - Path=/auth/**
+
+        - id: user-service-system
+          uri: lb://user-service
+          predicates:
+            - Path=/systemManage/**
+
+        # ========== 房间服务接口（不再 StripPrefix） ==========
+        - id: room-service
+          uri: lb://room-service
+          predicates:
+            - Path=/room/**
+
+        # ========== 预约服务接口（不再 StripPrefix） ==========
+        - id: reservation-service
+          uri: lb://reservation-service
+          predicates:
+            - Path=/reservation/**
+
+        # ========== 用户服务 Swagger 文档 ==========
+        - id: user-service-swagger
+          uri: lb://user-service
+          predicates:
+            - Path=/user/v3/api-docs
+            - Path=/user/v3/api-docs/**
+          filters:
+            - StripPrefix=1
+
+
+# ====================== Swagger 聚合 ======================
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    path: /swagger-ui.html
+    disable-swagger-default-url: true  # 不让 UI 重写地址
+    urls:
+      - name: 用户服务
+        url: /user/v3/api-docs
+      - name: 房间服务
+        url: /room/v3/api-docs
+      - name: 预约服务
+        url: /reservation/v3/api-docs
