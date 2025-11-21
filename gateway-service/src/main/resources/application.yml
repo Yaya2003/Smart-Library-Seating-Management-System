@@ -23,6 +23,10 @@ spring:
         port: 8719
 
     gateway:
+      default-filters:
+        # 去重 CORS 相关响应头，避免浏览器提示重复的 Access-Control-Allow-Origin
+        - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials
+
       globalcors:
         add-to-simple-url-handler-mapping: true
         corsConfigurations:
@@ -52,7 +56,16 @@ spring:
             - Path=/reservation/v3/api-docs/**
           filters:
             - StripPrefix=1
-        # ========== 用户服务业务接口（不再 StripPrefix） ==========
+
+        # 人脸服务 Swagger 文档
+        - id: face-service-swagger
+          uri: lb://face-service
+          predicates:
+            - Path=/face/v3/api-docs
+            - Path=/face/v3/api-docs/**
+          filters:
+            - StripPrefix=1
+        # ========== 用户服务业务接口（不做 StripPrefix）==========
         - id: user-service-auth
           uri: lb://user-service
           predicates:
@@ -62,18 +75,40 @@ spring:
           uri: lb://user-service
           predicates:
             - Path=/systemManage/**
+        - id: user-service-template
+          uri: lb://user-service
+          predicates:
+            - Path=/systemManage/template/**
 
-        # ========== 房间服务接口（不再 StripPrefix） ==========
+        - id: user-service-class
+          uri: lb://user-service
+          predicates:
+            - Path=/classInfo/**
+
+        - id: user-service-college
+          uri: lb://user-service
+          predicates:
+            - Path=/college/**
+
+        # ========== 房间服务接口（不做 StripPrefix）==========
         - id: room-service
           uri: lb://room-service
           predicates:
             - Path=/room/**
 
-        # ========== 预约服务接口（不再 StripPrefix） ==========
+        # ========== 预约服务接口（不做 StripPrefix）==========
         - id: reservation-service
           uri: lb://reservation-service
           predicates:
             - Path=/reservation/**
+
+        # ========== 人脸服务接口 ==========
+        - id: face-service
+          uri: lb://face-service
+          predicates:
+            - Path=/face/**
+          filters:
+            - StripPrefix=1
 
         # ========== 用户服务 Swagger 文档 ==========
         - id: user-service-swagger
@@ -99,3 +134,5 @@ springdoc:
         url: /room/v3/api-docs
       - name: 预约服务
         url: /reservation/v3/api-docs
+      - name: 人脸服务
+        url: /face/v3/api-docs

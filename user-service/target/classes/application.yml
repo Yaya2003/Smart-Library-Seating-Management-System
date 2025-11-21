@@ -23,6 +23,21 @@ spring:
           max-idle: 8
           min-idle: 0
 
+  # email smtp config
+  mail:
+    username: 202743265@qq.com
+    password: ybhksymjaxtxbjgj
+    host: smtp.qq.com
+    port: 465
+    protocol: smtps
+    default-encoding: UTF-8
+    properties:
+      mail:
+        smtp:
+          socketFactoryClass: javax.net.ssl.SSLSocketFactory
+          debug: true
+          ssl: true
+
   gson:
     date-format: yyyy-MM-dd HH:mm:ss
     enable-complex-map-key-serialization: true
@@ -44,6 +59,10 @@ spring:
 server:
   port: 8081
 
+templates:
+  import-student: classpath:templates/student-import.xlsx
+  import-teacher: classpath:templates/teacher-import.xlsx
+
 mybatis-plus:
   configuration:
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
@@ -51,4 +70,3 @@ mybatis-plus:
 logging:
   level:
     org.springframework.security: DEBUG
-

@@ -20,7 +20,9 @@ public class User {
     private Integer age;
     private String gender;
     private String className;
+    private Long classId;
     private String department;
+    private Long collegeId;
 
     @GsonIgnore
     private String password;

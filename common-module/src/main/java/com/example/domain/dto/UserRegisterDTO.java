@@ -20,9 +20,13 @@ public class UserRegisterDTO {
     private String className;
     private String department;
 
+    @NotBlank(message = "邮箱不能为空")
     private String email;
 
     private String phone;
+
+    @NotBlank(message = "验证码不能为空")
+    private String code;
 
     private String state;
 

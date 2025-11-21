@@ -42,14 +42,19 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/auth/register",
                                 "/auth/login",
+                                "/auth/loginByEmailCode",
                                 "/auth/loginByUserId",
+                                "/auth/sendEmailCode",
                                 "/auth/refresh",
                                 "/auth/logout",
                                 "/register",
                                 "/login",
+                                "/loginByEmailCode",
                                 "/loginByUserId",
+                                "/sendEmailCode",
                                 "/refresh",
-                                "/logout"
+                                "/logout",
+                                "/systemManage/template/**"
                         ).permitAll()
                         .requestMatchers(
                                 "/v3/api-docs/**",

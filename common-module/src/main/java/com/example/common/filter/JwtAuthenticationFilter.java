@@ -34,13 +34,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/auth/logout",
             "/auth/refresh",
             "/auth/loginByUserId",
+            "/auth/loginByEmailCode",
+            "/auth/sendEmailCode",
             "/register",
             "/login",
             "/logout",
             "/refresh",
             "/loginByUserId",
-            "/room/**",
-            "/reservation/**",
+            "/loginByEmailCode",
+            "/sendEmailCode",
+            "/ws/**",
             "/v3/api-docs/**",
             "/**/v3/api-docs/**",
             "/swagger-ui.html",
@@ -74,6 +77,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 logger.info("Skipping JWT filter for white-list path: " + path);
                 return true;
             }
+        }
+
+        // WebSocket 握手（Upgrade 头）时如未携带 token，直接放行，避免识别超时
+        String upgrade = request.getHeader("Upgrade");
+        if (("websocket".equalsIgnoreCase(upgrade) || "websocket".equalsIgnoreCase(request.getHeader("Connection")))
+                && path.contains("/ws/")) {
+            logger.info("Skipping JWT filter for WebSocket path: " + path);
+            return true;
         }
         return false;
     }

@@ -67,6 +67,7 @@
 		<module>reservation-service</module>
 		<module>gateway-service</module>
 		<module>eureka-server</module>
+		<module>face-service</module>
 	</modules>
 
 </project>
