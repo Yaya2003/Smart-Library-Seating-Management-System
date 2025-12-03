@@ -10,6 +10,7 @@ import com.example.domain.po.Seat;
 import com.example.domain.vo.ReservationVO;
 import com.example.mapper.SeatMapper;
 import com.example.service.ReservationService;
+import com.example.service.impl.ReservationServiceImpl;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
@@ -110,7 +111,7 @@ public class ReservationController {
         if (db == null) {
             return ResultView.error(HttpStatus.BAD_REQUEST.value(), "预约不存在或已被取消");
         }
-        if (!canUserCancelByTime(db, isAdmin)) {
+        if (!canUserCancelByTimeV2(db, isAdmin)) {
             return ResultView.error(HttpStatus.FORBIDDEN.value(), "距离开始时间不足10分钟，无法取消该预约");
         }
 
@@ -134,7 +135,7 @@ public class ReservationController {
             if (db == null) {
                 return ResultView.error(HttpStatus.BAD_REQUEST.value(), "预约不存在或已被取消");
             }
-            if (!canUserCancelByTime(db, false)) {
+            if (!canUserCancelByTimeV2(db, false)) {
                 return ResultView.error(HttpStatus.FORBIDDEN.value(), "距离开始时间不足10分钟，无法取消该预约");
             }
 
@@ -428,6 +429,41 @@ public class ReservationController {
             String status
       ) {
       }
+    private record ScanCheckinRequest(
+            @NotNull Long seatId,
+            @NotBlank String qrToken
+    ) {}
+
+    private record ScanCheckinResponse(
+            Long reservationId,
+            long remainMinutes
+    ) {}
+    @PostMapping("/scanCheckin")
+    public ResultView<?> scanCheckin(@RequestBody @Valid ScanCheckinRequest request) {
+        UserSession userSession = currentUserSession();
+        if (userSession == null) {
+            return ResultView.error(HttpStatus.UNAUTHORIZED.value(), "未登录");
+        }
+        try {
+            Reservation res = ((ReservationServiceImpl) reservationService)
+                    .scanCheckin(request.seatId(), request.qrToken(), userSession);
+
+            LocalDate date = LocalDate.parse(res.getDate());
+            String slotCode = res.getTimeSlot().toUpperCase(Locale.ROOT);
+            com.example.domain.enums.TimeSlot slot = com.example.domain.enums.TimeSlot.valueOf(slotCode);
+
+            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime slotEnd = LocalDateTime.of(date, slot.getEnd());
+            long remainMinutes = java.time.Duration.between(now, slotEnd).toMinutes();
+            if (remainMinutes < 0) {
+                remainMinutes = 0;
+            }
+
+            return ResultView.success(new ScanCheckinResponse(res.getReservationId(), remainMinutes));
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            return ResultView.error(HttpStatus.BAD_REQUEST.value(), e.getMessage());
+        }
+    }
 
       /**
        * 统一的用户取消时间校验逻辑：
@@ -467,6 +503,55 @@ public class ReservationController {
                   }
                   LocalDateTime created = LocalDateTime.ofInstant(createAt.toInstant(), ZoneId.systemDefault());
                   LocalDateTime lastCancelTime = created.plusMinutes(20);
+                  return !now.isAfter(lastCancelTime);
+              }
+          } catch (Exception ignored) {
+              // 解析异常时不强制限制，避免老数据导致无法取消
+              return true;
+          }
+      }
+
+      /**
+       * 新规则：用户取消时间校验（V2）
+       * 1. 管理员：不受时间限制
+       * 2. 本时间段预约（在该时间段内创建的预约）：创建后 20 分钟内可以取消
+       * 3. 未来时间段预约：时间段开始前 30 分钟及之后不允许取消
+       */
+      private boolean canUserCancelByTimeV2(Reservation reservation, boolean isAdmin) {
+          if (isAdmin) {
+              return true;
+          }
+          if (reservation == null || reservation.getDate() == null || reservation.getTimeSlot() == null) {
+              return true;
+          }
+
+          try {
+              LocalDate date = LocalDate.parse(reservation.getDate());
+              String slotCode = reservation.getTimeSlot().toUpperCase(Locale.ROOT);
+              com.example.domain.enums.TimeSlot slot = com.example.domain.enums.TimeSlot.valueOf(slotCode);
+
+              LocalDateTime slotStart = LocalDateTime.of(date, slot.getStart());
+              LocalDateTime slotEnd = LocalDateTime.of(date, slot.getEnd());
+              LocalDateTime now = LocalDateTime.now();
+
+              Date createAt = reservation.getCreateAt();
+              LocalDateTime created = createAt != null
+                      ? LocalDateTime.ofInstant(createAt.toInstant(), ZoneId.systemDefault())
+                      : null;
+
+              // 本时间段预约：创建时间在 [slotStart, slotEnd) 内
+              boolean sameSlotReservation =
+                      created != null
+                              && !created.isBefore(slotStart)
+                              && created.isBefore(slotEnd);
+
+              if (sameSlotReservation) {
+                  // 当前时间段内预约：创建后 20 分钟内可以取消
+                  LocalDateTime lastCancelTime = created.plusMinutes(20);
+                  return !now.isAfter(lastCancelTime);
+              } else {
+                  // 未来时间段预约：时间段开始前 30 分钟起不允许取消
+                  LocalDateTime lastCancelTime = slotStart.minusMinutes(30);
                   return !now.isAfter(lastCancelTime);
               }
           } catch (Exception ignored) {

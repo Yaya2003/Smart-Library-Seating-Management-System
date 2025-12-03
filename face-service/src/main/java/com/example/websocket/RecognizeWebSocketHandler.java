@@ -60,8 +60,10 @@ public class RecognizeWebSocketHandler extends TextWebSocketHandler {
     private void writeMessage(WebSocketSession session, String payload) {
         try {
             session.sendMessage(new TextMessage(payload));
+            System.out.println("发送的消息"+new TextMessage(payload));
         } catch (IOException e) {
             log.warn("send websocket message failed", e);
+            System.out.println("报错的消息："+e);
         }
     }
 

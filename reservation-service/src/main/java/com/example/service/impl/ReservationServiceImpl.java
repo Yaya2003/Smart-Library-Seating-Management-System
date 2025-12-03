@@ -77,15 +77,26 @@ public class ReservationServiceImpl extends ServiceImpl<ReservationMapper, Reser
         reservation.setTimeSlot(slotCode);
         reservation.setTime(slotCode);
         TimeSlot slot = TimeSlot.valueOf(slotCode);
-        if (targetDate.isEqual(today)) {
-            LocalTime nowTime = LocalTime.now();
-            if (nowTime.isAfter(slot.getEnd())) {
+
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime slotStart = LocalDateTime.of(targetDate, slot.getStart());
+        LocalDateTime slotEnd = LocalDateTime.of(targetDate, slot.getEnd());
+        boolean isToday = targetDate.isEqual(today);
+
+        // 当天预约的限制
+        if (isToday) {
+            // 时间段已结束，不能预约
+            if (now.toLocalTime().isAfter(slot.getEnd())) {
                 throw new IllegalArgumentException("该时间段已结束，无法预约");
             }
-        }
-        LocalDateTime slotStart = LocalDateTime.of(targetDate, slot.getStart());
-        if (targetDate.isEqual(today) && LocalDateTime.now().isAfter(slotStart)) {
-            slotStart = LocalDateTime.now();
+            // 本时间段内，且距离结束 < 30 分钟，禁止预约
+            boolean sameSlotReservationNow = !now.isBefore(slotStart) && now.isBefore(slotEnd);
+            if (sameSlotReservationNow) {
+                LocalDateTime latestBookTime = slotEnd.minusMinutes(30);
+                if (!now.isBefore(latestBookTime)) {
+                    throw new IllegalArgumentException("距离该时间段结束不足30分钟，无法预约");
+                }
+            }
         }
 
         Seat seat = seatMapper.selectById(reservation.getSeatId());
@@ -131,13 +142,27 @@ public class ReservationServiceImpl extends ServiceImpl<ReservationMapper, Reser
         Date nowDate = new Date();
         reservation.setCreateAt(nowDate);
         reservation.setUpdateAt(nowDate);
-        reservation.setExpiresAt(slotStart.plusMinutes(30));
+
+        // 过期时间用于自动违约：
+        // - 本时间段预约：从创建时刻起 30 分钟内必须签到
+        // - 未来时间段预约：从时间段开始起 10 分钟内必须签到
+        boolean sameSlotReservation = isToday && !now.isBefore(slotStart) && now.isBefore(slotEnd);
+        LocalDateTime expiresAt;
+        if (sameSlotReservation) {
+            expiresAt = now.plusMinutes(30);
+        } else {
+            expiresAt = slotStart.plusMinutes(10);
+        }
+        reservation.setExpiresAt(expiresAt);
+
         boolean saved = this.save(reservation);
         if (saved) {
             notifySeatStatus(reservation, ReservationStatus.PENDING.name());
         }
         return saved;
     }
+
+
 
     @Override
     public void cancelReservation(Long reservationId, UserSession userSession, boolean isAdmin) {
@@ -187,35 +212,54 @@ public class ReservationServiceImpl extends ServiceImpl<ReservationMapper, Reser
         if (!ReservationStatus.PENDING.name().equals(db.getStatus())) {
             throw new IllegalStateException("当前状态不可签到");
         }
+
         LocalDate targetDate = LocalDate.parse(db.getDate());
-        if (targetDate.isAfter(LocalDate.now()) || targetDate.isBefore(LocalDate.now())) {
-            throw new IllegalStateException("不在预约日期内");
+        if (!targetDate.isEqual(LocalDate.now())) {
+            throw new IllegalStateException("不在预约日期");
         }
+
         TimeSlot slot = TimeSlot.valueOf(db.getTimeSlot().toUpperCase(Locale.ROOT));
-        LocalDateTime start = LocalDateTime.of(targetDate, slot.getStart());
-        if (db.getCreateAt() != null) {
-            LocalDateTime created = LocalDateTime.ofInstant(db.getCreateAt().toInstant(), ZoneId.systemDefault());
-            if (created.isAfter(start)) {
-                start = created;
-            }
-        }
-        if (LocalDateTime.now().isAfter(start)) {
-            start = LocalDateTime.now();
-        }
-        LocalDateTime deadline = start.plusMinutes(30);
+        LocalDateTime slotStart = LocalDateTime.of(targetDate, slot.getStart());
+        LocalDateTime slotEnd = LocalDateTime.of(targetDate, slot.getEnd());
+
         LocalDateTime now = LocalDateTime.now();
-        if (now.isBefore(start)) {
+        Date createAt = db.getCreateAt();
+        LocalDateTime created = createAt != null
+                ? LocalDateTime.ofInstant(createAt.toInstant(), ZoneId.systemDefault())
+                : null;
+
+        // 本时间段预约：创建时间在 [slotStart, slotEnd) 内
+        boolean sameSlotReservation =
+                created != null
+                        && !created.isBefore(slotStart)
+                        && created.isBefore(slotEnd);
+
+        LocalDateTime allowStart;
+        LocalDateTime allowEnd;
+        if (sameSlotReservation) {
+            // 本时间段内预约：从创建时刻起 30 分钟内允许签到
+            allowStart = created;
+            allowEnd = created.plusMinutes(30);
+        } else {
+            // 未来时间段预约：从时间段开始起 10 分钟内允许签到
+            allowStart = slotStart;
+            allowEnd = slotStart.plusMinutes(10);
+        }
+
+        if (now.isBefore(allowStart)) {
             throw new IllegalStateException("未到签到时间");
         }
-        if (now.isAfter(deadline)) {
+        if (now.isAfter(allowEnd)) {
             throw new IllegalStateException("已超过签到时间");
         }
+
         db.setStatus(ReservationStatus.CHECKED_IN.name());
         db.setCheckinAt(now);
         db.setUpdateAt(new Date());
         this.updateById(db);
         notifySeatStatus(db, ReservationStatus.CHECKED_IN.name());
     }
+
 
     @Override
     public List<ReservationVO> getReservation(Long userId) {
@@ -430,16 +474,15 @@ public class ReservationServiceImpl extends ServiceImpl<ReservationMapper, Reser
     }
 
     /**
-     * 自动释放过期未签到的预约并增加违约次数与封禁
+     * 自动释放过期未签到的预约，并在时间段结束后释放已签到座位
      */
     private void enforceExpiration() {
         LocalDateTime now = LocalDateTime.now();
+
+        // 1) 未签到的预约：按照 expiresAt 判定违约
         List<Reservation> expired = this.list(new LambdaQueryWrapper<Reservation>()
                 .eq(Reservation::getStatus, ReservationStatus.PENDING.name())
                 .lt(Reservation::getExpiresAt, now));
-        if (expired.isEmpty()) {
-            return;
-        }
         for (Reservation reservation : expired) {
             boolean adminUser = false;
             if (reservation.getUserId() != null) {
@@ -465,6 +508,124 @@ public class ReservationServiceImpl extends ServiceImpl<ReservationMapper, Reser
                 increaseViolation(reservation.getUserId());
             }
         }
+
+        // 2) 已签到的预约：时间段结束后统一释放座位（不记违约）
+        List<Reservation> checkedInList = this.list(new LambdaQueryWrapper<Reservation>()
+                .eq(Reservation::getStatus, ReservationStatus.CHECKED_IN.name()));
+        for (Reservation reservation : checkedInList) {
+            try {
+                LocalDate date = LocalDate.parse(reservation.getDate());
+                String slotCode = reservation.getTimeSlot().toUpperCase(Locale.ROOT);
+                TimeSlot slot = TimeSlot.valueOf(slotCode);
+                LocalDateTime slotEnd = LocalDateTime.of(date, slot.getEnd());
+                if (now.isAfter(slotEnd)) {
+                    reservation.setStatus(ReservationStatus.RELEASED.name());
+                    reservation.setUpdateAt(new Date());
+                    this.updateById(reservation);
+                    notifySeatStatus(reservation, ReservationStatus.RELEASED.name());
+                }
+            } catch (Exception ignored) {
+                // 无法解析的老数据跳过
+            }
+        }
+    }
+
+    /**
+     * 扫码立即入座：不受“最后30分钟不可预约”限制
+     * - 若本时间段已有该用户的预约，则直接视为签到
+     * - 若无，则创建一条已签到预约
+     */
+    public Reservation scanCheckin(Long seatId, String qrToken, UserSession userSession) {
+        enforceExpiration();
+        Assert.notNull(seatId, "座位ID不能为空");
+        Assert.notNull(qrToken, "二维码token不能为空");
+
+        Seat seat = seatMapper.selectById(seatId);
+        if (seat == null || !Objects.equals(seat.getStatus(), 1)) {
+            throw new IllegalStateException("座位不可用");
+        }
+        if (!qrToken.equals(seat.getQrToken())) {
+            throw new IllegalStateException("二维码无效或已过期");
+        }
+
+        Long userId = userSession.getUserId();
+
+        // 计算当前所属时间段
+        LocalDateTime now = LocalDateTime.now();
+        LocalDate today = now.toLocalDate();
+        LocalTime nowTime = now.toLocalTime();
+
+        TimeSlot currentSlot = null;
+        for (TimeSlot s : TimeSlot.values()) {
+            LocalTime start = s.getStart();
+            LocalTime end = s.getEnd();
+            if (!nowTime.isBefore(start) && nowTime.isBefore(end)) {
+                currentSlot = s;
+                break;
+            }
+        }
+        if (currentSlot == null) {
+            throw new IllegalStateException("当前不在任何可用时间段，无法入座");
+        }
+
+        String slotCode = currentSlot.name();
+        String dateStr = today.toString();
+
+        // 查询是否已有该用户在本时间段的预约
+        Reservation existing = this.getOne(new LambdaQueryWrapper<Reservation>()
+                .eq(Reservation::getSeatId, seatId)
+                .eq(Reservation::getDate, dateStr)
+                .eq(Reservation::getTimeSlot, slotCode)
+                .eq(Reservation::getUserId, userId)
+                .in(Reservation::getStatus,
+                        ReservationStatus.PENDING.name(),
+                        ReservationStatus.CHECKED_IN.name())
+                .last("limit 1"));
+
+        if (existing != null) {
+            if (ReservationStatus.CHECKED_IN.name().equals(existing.getStatus())) {
+                return existing;
+            }
+            // PENDING -> 扫码签到
+            existing.setStatus(ReservationStatus.CHECKED_IN.name());
+            existing.setCheckinAt(now);
+            existing.setUpdateAt(new Date());
+            this.updateById(existing);
+            notifySeatStatus(existing, ReservationStatus.CHECKED_IN.name());
+            return existing;
+        }
+
+        // 创建一条新的已签到预约
+        Reservation reservation = new Reservation();
+        reservation.setSeatId(seatId);
+        reservation.setUserId(userId);
+        reservation.setRoomId(seat.getRoomId());
+        reservation.setSeatName(seat.getName());
+
+        Room room = roomMapper.selectById(seat.getRoomId());
+        if (room != null) {
+            reservation.setRoomName(room.getRoomName());
+            reservation.setRow(seat.getRowNo());
+            reservation.setColumn(seat.getColNo());
+        }
+
+        reservation.setDate(dateStr);
+        reservation.setTimeSlot(slotCode);
+        reservation.setTime(slotCode);
+        reservation.setStatus(ReservationStatus.CHECKED_IN.name());
+
+        Date nowDate = new Date();
+        reservation.setCreateAt(nowDate);
+        reservation.setCheckinAt(now);
+        reservation.setUpdateAt(nowDate);
+
+        // expiresAt 对 CHECKED_IN 仅用于“到点释放”
+        LocalDateTime slotEnd = LocalDateTime.of(today, currentSlot.getEnd());
+        reservation.setExpiresAt(slotEnd);
+
+        this.save(reservation);
+        notifySeatStatus(reservation, ReservationStatus.CHECKED_IN.name());
+        return reservation;
     }
 
     private void increaseViolation(Long userId) {
