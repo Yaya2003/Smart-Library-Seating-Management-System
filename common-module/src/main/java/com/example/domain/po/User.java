@@ -1,5 +1,6 @@
 package com.example.domain.po;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.example.common.gson.GsonIgnore;
@@ -41,4 +42,19 @@ public class User {
     private String roles;
     private Date createAt;
     private Date updateAt;
+
+    /**
+     * 违约封禁截止时间；当前时间早于该值则禁止预约。
+     */
+    @TableField("ban_until")
+    private Date banUntil;
+
+    /**
+     * 累计违约次数。
+     */
+    @TableField("violation_count")
+    private Integer violationCount;
+
+    @TableField(exist = false)
+    private Boolean defaultPassword;
 }

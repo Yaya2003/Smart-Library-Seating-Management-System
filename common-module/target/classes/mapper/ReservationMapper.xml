@@ -2,20 +2,8 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd" >
 <mapper namespace="com.example.mapper.ReservationMapper">
     <delete id="deleteReservation">
-        DELETE FROM
-            reservation
-        WHERE
-            user_id = #{userId}
-        AND
-            room_id = #{roomId}
-        AND
-            `row` = #{row}
-        AND
-            `column` = #{column}
-        AND
-            time = #{time}
-        AND
-            date = #{date}
+        DELETE FROM reservation
+        WHERE reservation_id = #{reservationId}
+          AND user_id = #{userId}
     </delete>
 </mapper>
-

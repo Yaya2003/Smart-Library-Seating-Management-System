@@ -2,58 +2,519 @@ package com.example.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.example.common.session.UserSession;
+import com.example.domain.enums.ReservationStatus;
+import com.example.domain.enums.TimeSlot;
 import com.example.domain.po.Reservation;
 import com.example.domain.po.Room;
+import com.example.domain.po.Seat;
+import com.example.domain.po.User;
 import com.example.domain.vo.ReservationVO;
 import com.example.mapper.ReservationMapper;
 import com.example.mapper.RoomMapper;
+import com.example.mapper.SeatMapper;
+import com.example.mapper.UserMapper;
 import com.example.service.ReservationService;
+import com.example.websocket.SeatStatusMessage;
+import com.example.websocket.SeatWebSocketHandler;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.util.Assert;
+import org.springframework.util.StringUtils;
 
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
+import java.util.Objects;
 
 @Service
 public class ReservationServiceImpl extends ServiceImpl<ReservationMapper, Reservation> implements ReservationService {
 
-    @Autowired
-    private ReservationMapper reservationMapper;
+    private static final int BREACH_THRESHOLD = 3;
+    private static final int BAN_DAYS = 7;
 
     @Autowired
     private RoomMapper roomMapper;
 
+    @Autowired
+    private SeatMapper seatMapper;
+
+    @Autowired
+    private UserMapper userMapper;
+
+    @Autowired
+    private SeatWebSocketHandler seatWebSocketHandler;
+
     @Override
-    public void removeReservation(Reservation reservation) {
-        reservationMapper.deleteReservation(reservation);
+    public boolean createReservation(Reservation reservation, UserSession userSession) {
+        enforceExpiration();
+        normalizeReservationPayload(reservation);
+        Assert.notNull(reservation.getSeatId(), "座位不能为空");
+        Assert.notNull(reservation.getDate(), "预约日期不能为空");
+        Assert.notNull(reservation.getTimeSlot(), "时间段不能为空");
+        Long userId = userSession.getUserId();
+        reservation.setUserId(userId);
+        boolean isAdmin = userSession.getRoles() != null &&
+                (userSession.getRoles().contains("R_ADMIN")
+                        || userSession.getRoles().contains("R_TEACHER")
+                        || userSession.getRoles().contains("R_SUPER"));
+
+        LocalDate targetDate = LocalDate.parse(reservation.getDate());
+        LocalDate today = LocalDate.now();
+        if (targetDate.isBefore(today) || targetDate.isAfter(today.plusDays(7))) {
+            throw new IllegalArgumentException("仅可预约今日到未来7天的座位");
+        }
+
+        String slotCode = reservation.getTimeSlot().toUpperCase(Locale.ROOT);
+        reservation.setTimeSlot(slotCode);
+        reservation.setTime(slotCode);
+        TimeSlot slot = TimeSlot.valueOf(slotCode);
+        if (targetDate.isEqual(today)) {
+            LocalTime nowTime = LocalTime.now();
+            if (nowTime.isAfter(slot.getEnd())) {
+                throw new IllegalArgumentException("该时间段已结束，无法预约");
+            }
+        }
+        LocalDateTime slotStart = LocalDateTime.of(targetDate, slot.getStart());
+        if (targetDate.isEqual(today) && LocalDateTime.now().isAfter(slotStart)) {
+            slotStart = LocalDateTime.now();
+        }
+
+        Seat seat = seatMapper.selectById(reservation.getSeatId());
+        if (seat == null) {
+            throw new IllegalArgumentException("座位不存在");
+        }
+        if (!Objects.equals(seat.getStatus(), 1)) {
+            throw new IllegalStateException("座位已停用，无法预约");
+        }
+        reservation.setRoomId(seat.getRoomId());
+        reservation.setSeatName(seat.getName());
+
+        Room room = roomMapper.selectById(seat.getRoomId());
+        if (room != null) {
+            reservation.setRoomName(room.getRoomName());
+            reservation.setRow(seat.getRowNo());
+            reservation.setColumn(seat.getColNo());
+        }
+
+        if (!isAdmin) {
+            User user = userMapper.selectById(userId);
+            if (user != null && user.getBanUntil() != null && user.getBanUntil().after(new Date())) {
+                throw new IllegalStateException("您已被暂时禁止预约，请稍后再试");
+            }
+            long activeCount = this.count(new LambdaQueryWrapper<Reservation>()
+                    .eq(Reservation::getUserId, userId)
+                    .in(Reservation::getStatus, ReservationStatus.PENDING.name(), ReservationStatus.CHECKED_IN.name()));
+            if (activeCount > 0) {
+                throw new IllegalStateException("每个账号仅允许一个有效预约");
+            }
+        }
+
+        long seatOccupied = this.count(new LambdaQueryWrapper<Reservation>()
+                .eq(Reservation::getSeatId, reservation.getSeatId())
+                .eq(Reservation::getDate, reservation.getDate())
+                .eq(Reservation::getTimeSlot, reservation.getTimeSlot())
+                .in(Reservation::getStatus, ReservationStatus.PENDING.name(), ReservationStatus.CHECKED_IN.name()));
+        if (seatOccupied > 0) {
+            throw new IllegalStateException("该座位该时间段已有预约");
+        }
+
+        reservation.setStatus(ReservationStatus.PENDING.name());
+        Date nowDate = new Date();
+        reservation.setCreateAt(nowDate);
+        reservation.setUpdateAt(nowDate);
+        reservation.setExpiresAt(slotStart.plusMinutes(30));
+        boolean saved = this.save(reservation);
+        if (saved) {
+            notifySeatStatus(reservation, ReservationStatus.PENDING.name());
+        }
+        return saved;
+    }
+
+    @Override
+    public void cancelReservation(Long reservationId, UserSession userSession, boolean isAdmin) {
+        enforceExpiration();
+        Assert.notNull(reservationId, "预约ID不能为空");
+        Reservation db = this.getById(reservationId);
+        if (db == null) {
+            return;
+        }
+        if (!isAdmin && !Objects.equals(db.getUserId(), userSession.getUserId())) {
+            throw new IllegalStateException("无权取消该预约");
+        }
+        if (!ReservationStatus.PENDING.name().equals(db.getStatus())) {
+            throw new IllegalStateException("当前状态不可取消");
+        }
+        db.setStatus(ReservationStatus.CANCELLED.name());
+        db.setUpdateAt(new Date());
+        this.updateById(db);
+        notifySeatStatus(db, ReservationStatus.CANCELLED.name());
+    }
+
+    @Override
+    public void checkIn(Long reservationId, Long seatId, String qrToken, UserSession userSession) {
+        enforceExpiration();
+        Assert.notNull(reservationId, "预约ID不能为空");
+        Assert.notNull(seatId, "座位ID不能为空");
+        Assert.notNull(qrToken, "二维码token不能为空");
+
+        Seat seat = seatMapper.selectById(seatId);
+        if (seat == null || !Objects.equals(seat.getStatus(), 1)) {
+            throw new IllegalStateException("座位不可用");
+        }
+        if (!qrToken.equals(seat.getQrToken())) {
+            throw new IllegalStateException("二维码无效或已过期");
+        }
+
+        Reservation db = this.getById(reservationId);
+        if (db == null) {
+            throw new IllegalStateException("预约不存在");
+        }
+        if (!Objects.equals(db.getSeatId(), seatId)) {
+            throw new IllegalStateException("预约与座位不匹配");
+        }
+        if (!Objects.equals(db.getUserId(), userSession.getUserId())) {
+            throw new IllegalStateException("仅预约人可签到");
+        }
+        if (!ReservationStatus.PENDING.name().equals(db.getStatus())) {
+            throw new IllegalStateException("当前状态不可签到");
+        }
+        LocalDate targetDate = LocalDate.parse(db.getDate());
+        if (targetDate.isAfter(LocalDate.now()) || targetDate.isBefore(LocalDate.now())) {
+            throw new IllegalStateException("不在预约日期内");
+        }
+        TimeSlot slot = TimeSlot.valueOf(db.getTimeSlot().toUpperCase(Locale.ROOT));
+        LocalDateTime start = LocalDateTime.of(targetDate, slot.getStart());
+        if (db.getCreateAt() != null) {
+            LocalDateTime created = LocalDateTime.ofInstant(db.getCreateAt().toInstant(), ZoneId.systemDefault());
+            if (created.isAfter(start)) {
+                start = created;
+            }
+        }
+        if (LocalDateTime.now().isAfter(start)) {
+            start = LocalDateTime.now();
+        }
+        LocalDateTime deadline = start.plusMinutes(30);
+        LocalDateTime now = LocalDateTime.now();
+        if (now.isBefore(start)) {
+            throw new IllegalStateException("未到签到时间");
+        }
+        if (now.isAfter(deadline)) {
+            throw new IllegalStateException("已超过签到时间");
+        }
+        db.setStatus(ReservationStatus.CHECKED_IN.name());
+        db.setCheckinAt(now);
+        db.setUpdateAt(new Date());
+        this.updateById(db);
+        notifySeatStatus(db, ReservationStatus.CHECKED_IN.name());
     }
 
     @Override
     public List<ReservationVO> getReservation(Long userId) {
+        enforceExpiration();
         List<ReservationVO> reservationVOList = new ArrayList<>();
         List<Reservation> reservations = this.list(new LambdaQueryWrapper<Reservation>()
                 .eq(Reservation::getUserId, userId));
         for (Reservation reservation : reservations) {
-            String[] time = reservation.getDate().split("-");
-
-            LocalDate date = LocalDate.of(
-                    Integer.parseInt(time[0]),
-                    Integer.parseInt(time[1]),
-                    Integer.parseInt(time[2])
-            );
-
-            if (date.isBefore(LocalDate.now())) {
-                continue;
+            ReservationVO reservationVO = buildReservationVO(reservation);
+            if (reservationVO != null) {
+                reservationVO.setViolationCount(getViolationCount(userId));
+                reservationVOList.add(reservationVO);
             }
-
-            ReservationVO reservationVO = new ReservationVO();
-            Room room = roomMapper.selectById(reservation.getRoomId());
-            BeanUtils.copyProperties(room, reservationVO);
-            BeanUtils.copyProperties(reservation, reservationVO);
-            reservationVOList.add(reservationVO);
         }
         return reservationVOList;
+    }
+
+    @Override
+    public List<ReservationVO> listAll(Reservation probe) {
+        enforceExpiration();
+        LambdaQueryWrapper<Reservation> wrapper = new LambdaQueryWrapper<>();
+        if (probe != null) {
+            wrapper.eq(probe.getUserId() != null, Reservation::getUserId, probe.getUserId());
+            wrapper.eq(probe.getRoomId() != null, Reservation::getRoomId, probe.getRoomId());
+            wrapper.eq(probe.getSeatId() != null, Reservation::getSeatId, probe.getSeatId());
+            wrapper.eq(StringUtils.hasText(probe.getDate()), Reservation::getDate, probe.getDate());
+            wrapper.eq(StringUtils.hasText(probe.getTimeSlot()), Reservation::getTimeSlot, probe.getTimeSlot());
+            wrapper.eq(StringUtils.hasText(probe.getStatus()), Reservation::getStatus, probe.getStatus());
+        }
+        List<Reservation> list = this.list(wrapper);
+        List<ReservationVO> result = new ArrayList<>();
+        for (Reservation reservation : list) {
+            ReservationVO vo = buildReservationVO(reservation);
+            if (vo != null) {
+                result.add(vo);
+            }
+        }
+        return result;
+    }
+
+    @Override
+    public void saveByAdmin(Reservation reservation, UserSession userSession) {
+        enforceExpiration();
+        normalizeReservationPayload(reservation);
+        Assert.notNull(reservation.getSeatId(), "座位不能为空");
+        Assert.notNull(reservation.getDate(), "预约日期不能为空");
+        Assert.notNull(reservation.getTimeSlot(), "时间段不能为空");
+        if (reservation.getUserId() == null) {
+            reservation.setUserId(userSession.getUserId());
+        }
+
+        boolean isAdmin = userSession.getRoles() != null &&
+                (userSession.getRoles().contains("R_ADMIN")
+                        || userSession.getRoles().contains("R_TEACHER")
+                        || userSession.getRoles().contains("R_SUPER"));
+
+        Seat seat = seatMapper.selectById(reservation.getSeatId());
+        if (seat == null) {
+            throw new IllegalArgumentException("座位不存在");
+        }
+        reservation.setRoomId(seat.getRoomId());
+        reservation.setSeatName(seat.getName());
+        Room room = roomMapper.selectById(seat.getRoomId());
+        if (room != null) {
+            reservation.setRoomName(room.getRoomName());
+            reservation.setRow(seat.getRowNo());
+            reservation.setColumn(seat.getColNo());
+        }
+
+        String slotCode = reservation.getTimeSlot().toUpperCase(Locale.ROOT);
+        reservation.setTimeSlot(slotCode);
+        reservation.setTime(slotCode);
+
+        boolean isUpdate = reservation.getReservationId() != null;
+
+        LambdaQueryWrapper<Reservation> wrapper = new LambdaQueryWrapper<Reservation>()
+                .eq(Reservation::getSeatId, reservation.getSeatId())
+                .eq(Reservation::getDate, reservation.getDate())
+                .eq(Reservation::getTimeSlot, reservation.getTimeSlot())
+                .in(Reservation::getStatus, ReservationStatus.PENDING.name(), ReservationStatus.CHECKED_IN.name());
+
+        if (isUpdate) {
+            wrapper.ne(Reservation::getReservationId, reservation.getReservationId());
+        }
+
+        long seatOccupied = this.count(wrapper);
+
+        if (seatOccupied > 0 && !isAdmin) {
+            throw new IllegalStateException("该座位该时间段已有预约");
+        }
+
+        if (seatOccupied > 0 && isAdmin) {
+            List<Reservation> conflicts = this.list(wrapper);
+            for (Reservation conflict : conflicts) {
+                notifySeatStatus(conflict, ReservationStatus.CANCELLED.name());
+                this.removeById(conflict.getReservationId());
+            }
+        }
+
+        Date now = new Date();
+        if (!isUpdate) {
+            reservation.setStatus(StringUtils.hasText(reservation.getStatus()) ? reservation.getStatus() : ReservationStatus.PENDING.name());
+            reservation.setCreateAt(now);
+        }
+        reservation.setUpdateAt(now);
+        reservation.setExpiresAt(calculateExpireAt(LocalDate.parse(reservation.getDate()), reservation.getTimeSlot()));
+        this.saveOrUpdate(reservation);
+        notifySeatStatus(reservation, reservation.getStatus());
+    }
+
+    @Override
+    public void deleteByAdmin(Long reservationId) {
+        Assert.notNull(reservationId, "预约ID不能为空");
+        Reservation existing = this.getById(reservationId);
+        this.removeById(reservationId);
+        notifySeatStatus(existing, ReservationStatus.CANCELLED.name());
+    }
+
+    @Override
+    public void batchDeleteByAdmin(List<Long> reservationIds) {
+        Assert.notEmpty(reservationIds, "预约ID不能为空");
+        for (Long id : reservationIds) {
+            Reservation existing = this.getById(id);
+            this.removeById(id);
+            notifySeatStatus(existing, ReservationStatus.CANCELLED.name());
+        }
+    }
+
+    @Override
+    public void batchUpdateStatus(List<Long> ids, String targetStatus, UserSession userSession, boolean isAdmin) {
+        enforceExpiration();
+        Assert.notEmpty(ids, "ID must not be empty");
+        Assert.notNull(targetStatus, "Status must not be empty");
+
+        for (Long id : ids) {
+            Reservation res = this.getById(id);
+            if (res == null) {
+                continue;
+            }
+            if (!isAdmin && !Objects.equals(res.getUserId(), userSession.getUserId())) {
+                throw new IllegalStateException("No permission to operate reservation");
+            }
+
+            res.setStatus(targetStatus);
+            res.setUpdateAt(new Date());
+            this.updateById(res);
+            notifySeatStatus(res, targetStatus);
+        }
+    }
+
+    @Override
+    public int getViolationCount(Long userId) {
+        User user = userMapper.selectById(userId);
+        if (user == null || user.getViolationCount() == null) {
+            return 0;
+        }
+        return user.getViolationCount();
+    }
+
+    private ReservationVO buildReservationVO(Reservation reservation) {
+        ReservationVO reservationVO = new ReservationVO();
+        Room room = roomMapper.selectById(reservation.getRoomId());
+        User user = reservation.getUserId() != null ? userMapper.selectById(reservation.getUserId()) : null;
+        if (reservation.getSeatId() != null) {
+            Seat seat = seatMapper.selectById(reservation.getSeatId());
+            if (seat != null) {
+                reservationVO.setSeatId(seat.getId());
+                reservationVO.setSeatName(seat.getName());
+            }
+        }
+        if (room != null) {
+            BeanUtils.copyProperties(room, reservationVO);
+        }
+        BeanUtils.copyProperties(reservation, reservationVO);
+        reservationVO.setReservationId(reservation.getReservationId());
+        reservationVO.setUserId(reservation.getUserId());
+        reservationVO.setRoomId(reservation.getRoomId());
+        if (user != null) {
+            reservationVO.setUserName(user.getUserName());
+        }
+        return reservationVO;
+    }
+
+    private void notifySeatStatus(Reservation reservation, String statusOverride) {
+        if (reservation == null || seatWebSocketHandler == null) {
+            return;
+        }
+        String status = statusOverride != null ? statusOverride : reservation.getStatus();
+        SeatStatusMessage message = new SeatStatusMessage(
+                reservation.getRoomId(),
+                reservation.getSeatId(),
+                reservation.getRow(),
+                reservation.getColumn(),
+                reservation.getUserId(),
+                reservation.getDate(),
+                reservation.getTimeSlot(),
+                status
+        );
+        seatWebSocketHandler.broadcast(message);
+    }
+
+    private LocalDateTime calculateExpireAt(LocalDate date, String timeSlotCode) {
+        TimeSlot slot = TimeSlot.valueOf(timeSlotCode.toUpperCase(Locale.ROOT));
+        LocalDateTime slotStart = LocalDateTime.of(date, slot.getStart());
+        LocalDate today = LocalDate.now();
+        LocalDateTime now = LocalDateTime.now();
+        // 与 createReservation 保持一致：若是今天且当前时间已过开始时间，则从当前时间起算 30 分钟
+        if (date.isEqual(today) && now.isAfter(slotStart)) {
+            slotStart = now;
+        }
+        return slotStart.plusMinutes(30);
+    }
+
+    /**
+     * 自动释放过期未签到的预约并增加违约次数与封禁
+     */
+    private void enforceExpiration() {
+        LocalDateTime now = LocalDateTime.now();
+        List<Reservation> expired = this.list(new LambdaQueryWrapper<Reservation>()
+                .eq(Reservation::getStatus, ReservationStatus.PENDING.name())
+                .lt(Reservation::getExpiresAt, now));
+        if (expired.isEmpty()) {
+            return;
+        }
+        for (Reservation reservation : expired) {
+            boolean adminUser = false;
+            if (reservation.getUserId() != null) {
+                User user = userMapper.selectById(reservation.getUserId());
+                if (user != null && user.getRoles() != null) {
+                    String roles = user.getRoles();
+                    adminUser = roles.contains("R_ADMIN")
+                            || roles.contains("R_TEACHER")
+                            || roles.contains("R_SUPER");
+                }
+            }
+
+            reservation.setUpdateAt(new Date());
+            if (adminUser) {
+                // 管理员/老师的预约到期只自动释放，不计入违约
+                reservation.setStatus(ReservationStatus.RELEASED.name());
+                this.updateById(reservation);
+                notifySeatStatus(reservation, ReservationStatus.RELEASED.name());
+            } else {
+                reservation.setStatus(ReservationStatus.BREACH.name());
+                this.updateById(reservation);
+                notifySeatStatus(reservation, ReservationStatus.BREACH.name());
+                increaseViolation(reservation.getUserId());
+            }
+        }
+    }
+
+    private void increaseViolation(Long userId) {
+        if (userId == null) {
+            return;
+        }
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            return;
+        }
+        int count = user.getViolationCount() == null ? 0 : user.getViolationCount();
+        count += 1;
+        user.setViolationCount(count);
+        if (count >= BREACH_THRESHOLD) {
+            Instant banUntil = Instant.now().plus(BAN_DAYS, ChronoUnit.DAYS);
+            user.setBanUntil(Date.from(banUntil.atZone(ZoneId.systemDefault()).toInstant()));
+        }
+        userMapper.updateById(user);
+    }
+
+    /**
+     * 兼容旧前端传入的 row/column/中文时间段等参数
+     */
+    private void normalizeReservationPayload(Reservation reservation) {
+        if (reservation.getSeatId() == null
+                && reservation.getRoomId() != null
+                && reservation.getRow() != null
+                && reservation.getColumn() != null) {
+            Seat seat = seatMapper.selectOne(new LambdaQueryWrapper<Seat>()
+                    .eq(Seat::getRoomId, reservation.getRoomId())
+                    .eq(Seat::getRowNo, reservation.getRow())
+                    .eq(Seat::getColNo, reservation.getColumn()));
+            if (seat != null) {
+                reservation.setSeatId(seat.getId());
+            }
+        }
+        String slotCode = normalizeTimeSlot(reservation.getTimeSlot(), reservation.getTime());
+        reservation.setTimeSlot(slotCode);
+        reservation.setTime(slotCode);
+    }
+
+    private String normalizeTimeSlot(String timeSlot, String time) {
+        String raw = StringUtils.hasText(timeSlot) ? timeSlot : time;
+        if (!StringUtils.hasText(raw)) {
+            throw new IllegalArgumentException("时间段不能为空");
+        }
+        raw = raw.trim();
+        if ("上午".equals(raw)) raw = "MORNING";
+        if ("下午".equals(raw)) raw = "AFTERNOON";
+        if ("晚上".equals(raw) || "夜间".equals(raw)) raw = "EVENING";
+        return raw.toUpperCase(Locale.ROOT);
     }
 }

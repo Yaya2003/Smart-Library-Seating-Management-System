@@ -41,7 +41,11 @@
 				<type>pom</type>
 				<scope>import</scope>
 			</dependency>
-
+			<dependency>
+				<groupId>com.squareup.okhttp3</groupId>
+				<artifactId>okhttp</artifactId>
+				<version>4.12.0</version>
+			</dependency>
 			<!-- Alibaba 2023.x -->
 			<dependency>
 				<groupId>com.alibaba.cloud</groupId>

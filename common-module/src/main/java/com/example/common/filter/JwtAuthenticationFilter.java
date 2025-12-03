@@ -49,7 +49,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/swagger-ui.html",
             "/swagger-ui/**",
             "/swagger-resources/**",
-            "/webjars/**"
+            "/webjars/**",
+            // 开放房间接口（开发环境使用，如需收紧请移除）
+            "/room/**"
     };
 
     private final TokenRepository tokenRepository;
@@ -65,6 +67,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
         String path = request.getServletPath();
         String uri = request.getRequestURI();
+        // 预约相关必须走鉴权
+        if (path != null && path.startsWith("/reservation")) {
+            return false;
+        }
 
         // 任何包含 v3/api-docs 的路径都放行，避免经网关转发时前面多一层前缀
         if (path.contains("v3/api-docs") || uri.contains("v3/api-docs")) {

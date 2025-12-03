@@ -14,6 +14,8 @@ import com.example.domain.dto.TeacherImportDTO;
 import com.example.domain.dto.UpdateProfileDTO;
 import com.example.domain.dto.UserLoginDTO;
 import com.example.domain.dto.UserRegisterDTO;
+import com.example.domain.dto.ChangePasswordDTO;
+import com.example.domain.dto.ResetPasswordByEmailDTO;
 import com.example.domain.po.ClassInfo;
 import com.example.domain.po.College;
 import com.example.domain.po.User;
@@ -208,6 +210,53 @@ public class UserController {
         return ResultView.success(true);
     }
 
+    @PostMapping(path = "/auth/changePassword")
+    public ResultView<?> changePassword(@RequestBody @Valid ChangePasswordDTO changePasswordDTO) {
+        UserSession userSession = (UserSession) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        Long userId = userSession.getUserId();
+        User user = userService.getById(userId);
+        if (user == null) {
+            return ResultView.error(HttpStatus.BAD_REQUEST.value(), "用户不存在");
+        }
+
+        if (!passwordEncoder.matches(changePasswordDTO.getOldPassword(), user.getPassword())) {
+            return ResultView.error(HttpStatus.BAD_REQUEST.value(), "旧密码不正确");
+        }
+
+        if (passwordEncoder.matches(changePasswordDTO.getNewPassword(), user.getPassword())) {
+            return ResultView.error(HttpStatus.BAD_REQUEST.value(), "新密码不能与旧密码相同");
+        }
+
+        String encoded = passwordEncoder.encode(changePasswordDTO.getNewPassword());
+        userService.update(new LambdaUpdateWrapper<User>()
+                .eq(User::getUserId, userId)
+                .set(User::getPassword, encoded));
+
+        return ResultView.success(true);
+    }
+
+    @PostMapping(path = "/auth/resetPasswordByEmail")
+    public ResultView<?> resetPasswordByEmail(@RequestBody @Valid ResetPasswordByEmailDTO dto) {
+        if (!emailCodeService.verifyCode(dto.getEmail(), dto.getCode())) {
+            return ResultView.error(HttpStatus.BAD_REQUEST.value(), "邮箱验证码错误或已过期");
+        }
+
+        User user = userService.lambdaQuery()
+                .eq(User::getEmail, dto.getEmail())
+                .one();
+        if (user == null) {
+            return ResultView.error(HttpStatus.BAD_REQUEST.value(), "该邮箱未绑定用户");
+        }
+
+        String encoded = passwordEncoder.encode(dto.getNewPassword());
+        userService.update(new LambdaUpdateWrapper<User>()
+                .eq(User::getUserId, user.getUserId())
+                .set(User::getPassword, encoded));
+
+        emailCodeService.clearCode(dto.getEmail());
+        return ResultView.success(true);
+    }
+
     @PostMapping(path = "/auth/sendEmailCode")
     public ResultView<?> sendEmailCode(@RequestParam @jakarta.validation.constraints.Email String email) {
         if (emailCodeService.isLimited(email)) {
@@ -226,6 +275,10 @@ public class UserController {
         UserSession userSession = (UserSession) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
         Long id = userSession.getUserId();
         User user = userService.getById(id);
+        if (user != null) {
+            boolean isDefault = DEFAULT_PASSWORD_HASH.equals(user.getPassword());
+            user.setDefaultPassword(isDefault);
+        }
         return ResultView.success(user);
     }
 

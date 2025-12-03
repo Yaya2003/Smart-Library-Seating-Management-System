@@ -1,10 +1,12 @@
 package com.example.controller;
 
+import com.alibaba.nacos.common.utils.StringUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.common.result.ResultView;
 import com.example.common.session.UserSession;
-import com.example.common.util.ArrayUtil;
+import com.example.domain.enums.ReservationStatus;
 import com.example.domain.po.Reservation;
 import com.example.domain.po.Room;
 import com.example.domain.vo.PageResponseVO;
@@ -13,10 +15,12 @@ import com.example.service.RoomService;
 import com.google.gson.Gson;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Arrays;
+import java.util.Date;
 import java.util.List;
 import java.util.Objects;
 
@@ -35,26 +39,33 @@ public class RoomController {
 
     @PostMapping(path = "/saveRoom")
     public ResultView<?> saveRoom(@RequestBody @Valid Room room) {
-        System.out.println(room.getSeatInfo());
         if (room.getRoomId() == null) {
-            int[][] seatInfo = new int[room.getRow()][room.getColumn()];
-            for (int[] strings : seatInfo) {
-                Arrays.fill(strings, -1);
+            // 新建：seat_info 未提供时初始化为空格
+            if (room.getSeatInfo() == null || room.getSeatInfo().isBlank()) {
+                int[][] seatInfo = new int[room.getRow()][room.getColumn()];
+                for (int[] strings : seatInfo) {
+                    Arrays.fill(strings, -1);
+                }
+                room.setSeatInfo(gson.toJson(seatInfo));
             }
-            room.setSeatInfo(gson.toJson(seatInfo));
-        } else if (room.getSeatInfo()!= null) {
-            Room oldRoom = roomService.getById(room.getRoomId());
-            int[][] seats = gson.fromJson(oldRoom.getSeatInfo(), int[][].class);
-            int[][] newSeats = ArrayUtil.adjustArraySize(seats, room.getRow(), room.getColumn());
-            ArrayUtil.copy2DArray(gson.fromJson(room.getSeatInfo(), int[][].class), newSeats);
-            room.setSeatInfo(gson.toJson(newSeats));
+            room.setCreateAt(new Date());
+            room.setUpdateAt(new Date());
+            roomService.save(room);
         } else {
-            Room oldRoom = roomService.getById(room.getRoomId());
-            int[][] seats = gson.fromJson(oldRoom.getSeatInfo(), int[][].class);
-            int[][] newSeats = ArrayUtil.adjustArraySize(seats, room.getRow(), room.getColumn());
-            room.setSeatInfo(gson.toJson(newSeats));
+            // 更新：仅更新基础字段，不触碰 seat_info，避免大字段锁和覆盖
+            LambdaUpdateWrapper<Room> wrapper = new LambdaUpdateWrapper<Room>()
+                    .eq(Room::getRoomId, room.getRoomId())
+                    .set(room.getRoomName() != null, Room::getRoomName, room.getRoomName())
+                    .set(room.getFloor() != null, Room::getFloor, room.getFloor())
+                    .set(room.getRow() != null, Room::getRow, room.getRow())
+                    .set(room.getColumn() != null, Room::getColumn, room.getColumn())
+                    .set(room.getState() != null, Room::getState, room.getState())
+                    .set(Room::getUpdateAt, new Date());
+            boolean ok = roomService.update(wrapper);
+            if (!ok) {
+                return ResultView.error(HttpStatus.BAD_REQUEST.value(), "房间不存在或更新失败");
+            }
         }
-        roomService.saveOrUpdate(room);
         return ResultView.success(true);
     }
 
@@ -102,9 +113,17 @@ public class RoomController {
 
     @GetMapping(path = "/getRoomsByFloor")
     public ResultView<?> getRoomsByFloor(@RequestParam Integer floor) {
-        UserSession userSession = (UserSession) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        Long id = userSession.getUserId();
-        List<String> roles = userSession.getRoles();
+        UserSession userSession = null;
+        try {
+            Object principal = SecurityContextHolder.getContext().getAuthentication() != null
+                    ? SecurityContextHolder.getContext().getAuthentication().getPrincipal() : null;
+            if (principal instanceof UserSession us) {
+                userSession = us;
+            }
+        } catch (Exception ignored) {
+        }
+        Long id = userSession != null ? userSession.getUserId() : null;
+        List<String> roles = userSession != null ? userSession.getRoles() : List.of();
         if (roles.contains("R_USER")) {
             List<Reservation> reservations = reservationMapper.selectList(new LambdaQueryWrapper<Reservation>().eq(Reservation::getUserId, id));
             List<Room> rooms = roomService.list(new LambdaQueryWrapper<Room>().eq(Room::getFloor, floor));
@@ -126,21 +145,38 @@ public class RoomController {
     }
 
     @GetMapping(path = "/getRoomsByReservation")
-    public ResultView<?> getRoomsByReservation(@RequestParam Integer floor,
+    public ResultView<?> getRoomsByReservation(@RequestParam(required = false) Integer floor,
                                                @RequestParam(required = false) String date,
                                                @RequestParam(required = false) String time) {
-        UserSession userSession = (UserSession) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        Long id = userSession.getUserId();
+        UserSession userSession = null;
+        try {
+            Object principal = SecurityContextHolder.getContext().getAuthentication() != null
+                    ? SecurityContextHolder.getContext().getAuthentication().getPrincipal() : null;
+            if (principal instanceof UserSession us) {
+                userSession = us;
+            }
+        } catch (Exception ignored) {
+        }
+        Long id = userSession != null ? userSession.getUserId() : null;
+        List<String> activeStatuses = List.of(
+                ReservationStatus.PENDING.name(),
+                ReservationStatus.CHECKED_IN.name()
+        );
         List<Reservation> reservations = reservationMapper.selectList(new LambdaQueryWrapper<Reservation>()
-                .eq(Reservation::getDate, date)
-                .eq(Reservation::getTime, time));
-        List<Room> rooms = roomService.list(new LambdaQueryWrapper<Room>().eq(Room::getFloor, floor));
+                .eq(StringUtils.hasText(date), Reservation::getDate, date)
+                .eq(StringUtils.hasText(time), Reservation::getTime, time)
+                .in(Reservation::getStatus, activeStatuses));
+        List<Room> rooms = roomService.list(new LambdaQueryWrapper<Room>()
+                .eq(floor != null, Room::getFloor, floor));
+        if (rooms.isEmpty()) {
+            return ResultView.success(rooms);
+        }
         for (Reservation reservation : reservations) {
             for (Room room : rooms) {
                 if (room.getRoomId().equals(reservation.getRoomId())) {
                     String seatInfo = room.getSeatInfo();
                     int[][] seatArray = gson.fromJson(seatInfo, int[][].class);
-                    seatArray[reservation.getRow()][reservation.getColumn()] = (Objects.equals(id, reservation.getUserId()) ? 3 : 1);
+                    seatArray[reservation.getRow()][reservation.getColumn()] = (id != null && Objects.equals(id, reservation.getUserId()) ? 3 : 1);
                     room.setSeatInfo(gson.toJson(seatArray));
                 }
             }

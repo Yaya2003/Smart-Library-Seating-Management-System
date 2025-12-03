@@ -1,4 +1,4 @@
-server:
+﻿server:
   port: 8080
 
 spring:
@@ -32,14 +32,28 @@ spring:
         corsConfigurations:
           '[/**]':
             allowedOrigins:
-              - http://localhost:9527
-              - http://localhost:8080
-              - http://127.0.0.1:8080
+              - https://localhost:9527
+              - https://localhost:8080
+              - https://127.0.0.1:8080
+              - https://192.168.96.136:9527
+              - https://192.168.96.136:8080
+              - ws://localhost:9527
+              - ws://localhost:8080
+              - ws://127.0.0.1:8080
+              - ws://192.168.96.136:9527
+              - ws://192.168.96.136:8080
             allowedMethods: "*"
             allowedHeaders: "*"
             allowCredentials: true
 
       routes:
+        # ========== WebSocket 路由（修正版）==========
+        - id: reservation-websocket
+          uri: lb://reservation-service
+          predicates:
+            - Path=/ws/**,/websocket/**
+          # 不剥前缀，保持完整路径 /ws/reservation 转发到预约服务
+
         # 房间服务 Swagger 文档
         - id: room-service-swagger
           uri: lb://room-service
@@ -65,6 +79,7 @@ spring:
             - Path=/face/v3/api-docs/**
           filters:
             - StripPrefix=1
+
         # ========== 用户服务业务接口（不做 StripPrefix）==========
         - id: user-service-auth
           uri: lb://user-service
@@ -75,6 +90,7 @@ spring:
           uri: lb://user-service
           predicates:
             - Path=/systemManage/**
+
         - id: user-service-template
           uri: lb://user-service
           predicates:
@@ -118,7 +134,6 @@ spring:
             - Path=/user/v3/api-docs/**
           filters:
             - StripPrefix=1
-
 
 # ====================== Swagger 聚合 ======================
 springdoc:
