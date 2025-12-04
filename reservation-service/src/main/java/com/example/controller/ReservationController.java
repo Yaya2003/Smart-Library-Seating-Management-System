@@ -7,8 +7,10 @@ import com.example.common.session.UserSession;
 import com.example.domain.enums.ReservationStatus;
 import com.example.domain.po.Reservation;
 import com.example.domain.po.Seat;
+import com.example.domain.po.FaceRecognitionLog;
 import com.example.domain.vo.ReservationVO;
 import com.example.mapper.SeatMapper;
+import com.example.mapper.FaceRecognitionLogMapper;
 import com.example.service.ReservationService;
 import com.example.service.impl.ReservationServiceImpl;
 import jakarta.validation.Valid;
@@ -26,6 +28,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.*;
+import jakarta.servlet.http.HttpServletRequest;
 
 @RestController
 @RequestMapping("/reservation")
@@ -36,6 +39,9 @@ public class ReservationController {
 
     @Autowired
     private SeatMapper seatMapper;
+
+    @Autowired
+    private FaceRecognitionLogMapper faceRecognitionLogMapper;
 
     /**
      * 用户创建预约（兼容旧前端：可传 seatId 或 roomId+row+column，以及 timeSlot 或 time 的中文值）
@@ -213,7 +219,22 @@ public class ReservationController {
      * 管理端列表（过滤查询）
      */
     @PostMapping("/admin/list")
-    public ResultView<?> listByAdmin(@RequestBody(required = false) Reservation probe) {
+    public ResultView<?> listByAdmin(@RequestBody(required = false) AdminReservationQuery query) {
+        Reservation probe = new Reservation();
+        if (query != null) {
+            probe.setRoomId(query.roomId());
+            probe.setUserId(query.userId());
+            probe.setSeatId(query.seatId());
+            probe.setDate(query.date());
+            probe.setTimeSlot(query.timeSlot());
+            probe.setStatus(query.status());
+            probe.setAge(query.age());
+            probe.setGender(query.gender());
+            probe.setClassName(query.className());
+            probe.setDepartment(query.department());
+            probe.setPhone(query.phone());
+            probe.setEmail(query.email());
+        }
         List<ReservationVO> list = reservationService.listAll(probe);
         return ResultView.success(list);
     }
@@ -415,6 +436,25 @@ public class ReservationController {
             @NotBlank String date,
             String timeSlot,
             String time
+    ) {
+    }
+
+    /**
+     * 管理端预约查询条件 DTO（仅包含简单字段，避免 Gson 反序列化 LocalDateTime 等复杂类型时报错）
+     */
+    private record AdminReservationQuery(
+            Long roomId,
+            Long userId,
+            Long seatId,
+            String date,
+            String timeSlot,
+            String status,
+            Integer age,
+            String gender,
+            String className,
+            String department,
+            String phone,
+            String email
     ) {
     }
 

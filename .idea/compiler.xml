@@ -7,6 +7,7 @@
         <sourceOutputDir name="target/generated-sources/annotations" />
         <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
         <outputRelativeToContentRoot value="true" />
+        <module name="statistics-service" />
         <module name="facial-recognition-backend" />
         <module name="common-module" />
         <module name="gateway-service" />
@@ -27,6 +28,7 @@
       <module name="gateway-service" options="-parameters" />
       <module name="reservation-service" options="-parameters" />
       <module name="room-service" options="-parameters" />
+      <module name="statistics-service" options="-parameters" />
       <module name="user-service" options="-parameters" />
     </option>
   </component>

@@ -49,9 +49,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/swagger-ui.html",
             "/swagger-ui/**",
             "/swagger-resources/**",
-            "/webjars/**",
-            // 开放房间接口（开发环境使用，如需收紧请移除）
-            "/room/**"
+            "/webjars/**"
     };
 
     private final TokenRepository tokenRepository;

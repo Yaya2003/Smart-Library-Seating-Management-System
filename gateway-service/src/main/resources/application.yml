@@ -80,6 +80,15 @@ spring:
           filters:
             - StripPrefix=1
 
+        # 统计服务 Swagger 文档
+        - id: statistics-service-swagger
+          uri: lb://statistics-service
+          predicates:
+            - Path=/statistics/v3/api-docs
+            - Path=/statistics/v3/api-docs/**
+          filters:
+            - StripPrefix=1
+
         # ========== 用户服务业务接口（不做 StripPrefix）==========
         - id: user-service-auth
           uri: lb://user-service
@@ -126,6 +135,17 @@ spring:
           filters:
             - StripPrefix=1
 
+        # ========== 统计服务接口 ==========
+        # 前端调用示例：
+        #   /statistics-service/api/statistics/overview
+        # 将通过 StripPrefix 去掉 /statistics-service，转发到 statistics-service 的 /api/statistics/overview
+        - id: statistics-service
+          uri: lb://statistics-service
+          predicates:
+            - Path=/statistics-service/**
+          filters:
+            - StripPrefix=1
+
         # ========== 用户服务 Swagger 文档 ==========
         - id: user-service-swagger
           uri: lb://user-service
@@ -151,3 +171,5 @@ springdoc:
         url: /reservation/v3/api-docs
       - name: 人脸服务
         url: /face/v3/api-docs
+      - name: 统计服务
+        url: /statistics/v3/api-docs

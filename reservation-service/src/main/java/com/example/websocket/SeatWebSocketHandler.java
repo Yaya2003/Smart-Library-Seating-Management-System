@@ -12,6 +12,7 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 import java.io.IOException;
 import java.net.URI;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -51,12 +52,33 @@ public class SeatWebSocketHandler extends TextWebSocketHandler {
             return;
         }
         String key = buildKey(message.getRoomId(), message.getDate(), message.getTimeSlot());
-        String payload = gson.toJson(message);
         Set<WebSocketSession> sessions = roomSessionMap.getOrDefault(key, Collections.emptySet());
         for (WebSocketSession session : sessions) {
             if (session.isOpen()) {
                 try {
-                    session.sendMessage(new TextMessage(payload));
+                    Long viewerUserId = null;
+                    Object viewerAttr = session.getAttributes().get("viewerUserId");
+                    if (viewerAttr instanceof Long) {
+                        viewerUserId = (Long) viewerAttr;
+                    }
+
+                    boolean mine = viewerUserId != null
+                            && message.getUserId() != null
+                            && message.getUserId().equals(viewerUserId);
+
+                    Map<String, Object> payload = new HashMap<>();
+                    payload.put("type", message.getType());
+                    payload.put("roomId", message.getRoomId());
+                    payload.put("seatId", message.getSeatId());
+                    payload.put("row", message.getRow());
+                    payload.put("column", message.getColumn());
+                    payload.put("userId", message.getUserId());
+                    payload.put("date", message.getDate());
+                    payload.put("timeSlot", message.getTimeSlot());
+                    payload.put("status", message.getStatus());
+                    payload.put("mine", mine);
+
+                    session.sendMessage(new TextMessage(gson.toJson(payload)));
                 } catch (IOException e) {
                     log.debug("Send seat websocket message failed", e);
                 }
@@ -85,6 +107,10 @@ public class SeatWebSocketHandler extends TextWebSocketHandler {
         Long roomId = parseLong(params.get("roomId"));
         String date = params.getOrDefault("date", "");
         String timeSlot = params.getOrDefault("timeSlot", "");
+        Long viewerUserId = parseLong(params.get("userId"));
+        if (viewerUserId != null) {
+            session.getAttributes().put("viewerUserId", viewerUserId);
+        }
         return buildKey(roomId, date, timeSlot);
     }
 
@@ -115,4 +141,3 @@ public class SeatWebSocketHandler extends TextWebSocketHandler {
         }
     }
 }
-

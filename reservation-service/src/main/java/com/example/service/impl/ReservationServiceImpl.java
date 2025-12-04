@@ -9,11 +9,13 @@ import com.example.domain.po.Reservation;
 import com.example.domain.po.Room;
 import com.example.domain.po.Seat;
 import com.example.domain.po.User;
+import com.example.domain.po.FaceRecognitionLog;
 import com.example.domain.vo.ReservationVO;
 import com.example.mapper.ReservationMapper;
 import com.example.mapper.RoomMapper;
 import com.example.mapper.SeatMapper;
 import com.example.mapper.UserMapper;
+import com.example.mapper.FaceRecognitionLogMapper;
 import com.example.service.ReservationService;
 import com.example.websocket.SeatStatusMessage;
 import com.example.websocket.SeatWebSocketHandler;
@@ -52,6 +54,9 @@ public class ReservationServiceImpl extends ServiceImpl<ReservationMapper, Reser
 
     @Autowired
     private SeatWebSocketHandler seatWebSocketHandler;
+
+    @Autowired
+    private FaceRecognitionLogMapper faceRecognitionLogMapper;
 
     @Override
     public boolean createReservation(Reservation reservation, UserSession userSession) {
@@ -191,6 +196,11 @@ public class ReservationServiceImpl extends ServiceImpl<ReservationMapper, Reser
         Assert.notNull(seatId, "座位ID不能为空");
         Assert.notNull(qrToken, "二维码token不能为空");
 
+        boolean isAdmin = userSession.getRoles() != null &&
+                (userSession.getRoles().contains("R_ADMIN")
+                        || userSession.getRoles().contains("R_TEACHER")
+                        || userSession.getRoles().contains("R_SUPER"));
+
         Seat seat = seatMapper.selectById(seatId);
         if (seat == null || !Objects.equals(seat.getStatus(), 1)) {
             throw new IllegalStateException("座位不可用");
@@ -282,12 +292,48 @@ public class ReservationServiceImpl extends ServiceImpl<ReservationMapper, Reser
         enforceExpiration();
         LambdaQueryWrapper<Reservation> wrapper = new LambdaQueryWrapper<>();
         if (probe != null) {
-            wrapper.eq(probe.getUserId() != null, Reservation::getUserId, probe.getUserId());
+            // 基于预约自身字段的过滤
             wrapper.eq(probe.getRoomId() != null, Reservation::getRoomId, probe.getRoomId());
             wrapper.eq(probe.getSeatId() != null, Reservation::getSeatId, probe.getSeatId());
             wrapper.eq(StringUtils.hasText(probe.getDate()), Reservation::getDate, probe.getDate());
             wrapper.eq(StringUtils.hasText(probe.getTimeSlot()), Reservation::getTimeSlot, probe.getTimeSlot());
             wrapper.eq(StringUtils.hasText(probe.getStatus()), Reservation::getStatus, probe.getStatus());
+
+            // 基于用户信息的过滤（班级、性别、年龄、手机号、邮箱、学院等）
+            boolean hasUserFilter =
+                    probe.getUserId() != null
+                            || probe.getAge() != null
+                            || StringUtils.hasText(probe.getGender())
+                            || StringUtils.hasText(probe.getClassName())
+                            || StringUtils.hasText(probe.getDepartment())
+                            || StringUtils.hasText(probe.getPhone())
+                            || StringUtils.hasText(probe.getEmail());
+
+            if (hasUserFilter) {
+                LambdaQueryWrapper<User> userWrapper = new LambdaQueryWrapper<>();
+                userWrapper.eq(probe.getUserId() != null, User::getUserId, probe.getUserId());
+                userWrapper.eq(probe.getAge() != null, User::getAge, probe.getAge());
+                userWrapper.eq(StringUtils.hasText(probe.getGender()), User::getGender, probe.getGender());
+                userWrapper.like(StringUtils.hasText(probe.getClassName()), User::getClassName, probe.getClassName());
+                userWrapper.like(StringUtils.hasText(probe.getDepartment()), User::getDepartment, probe.getDepartment());
+                userWrapper.like(StringUtils.hasText(probe.getPhone()), User::getPhone, probe.getPhone());
+                userWrapper.like(StringUtils.hasText(probe.getEmail()), User::getEmail, probe.getEmail());
+
+                List<User> users = userMapper.selectList(userWrapper);
+                if (users.isEmpty()) {
+                    return new ArrayList<>();
+                }
+                List<Long> userIds = new ArrayList<>();
+                for (User u : users) {
+                    if (u.getUserId() != null) {
+                        userIds.add(u.getUserId());
+                    }
+                }
+                if (userIds.isEmpty()) {
+                    return new ArrayList<>();
+                }
+                wrapper.in(Reservation::getUserId, userIds);
+            }
         }
         List<Reservation> list = this.list(wrapper);
         List<ReservationVO> result = new ArrayList<>();
@@ -439,6 +485,12 @@ public class ReservationServiceImpl extends ServiceImpl<ReservationMapper, Reser
         reservationVO.setRoomId(reservation.getRoomId());
         if (user != null) {
             reservationVO.setUserName(user.getUserName());
+            reservationVO.setAge(user.getAge());
+            reservationVO.setGender(user.getGender());
+            reservationVO.setClassName(user.getClassName());
+            reservationVO.setDepartment(user.getDepartment());
+            reservationVO.setPhone(user.getPhone());
+            reservationVO.setEmail(user.getEmail());
         }
         return reservationVO;
     }

@@ -12,6 +12,21 @@ public class ReservationVO {
 
     private String userName;
 
+    private Integer age;
+
+    private String gender;
+
+    private String className;
+
+    /**
+     * 学院（用户所属院系/部门）
+     */
+    private String department;
+
+    private String phone;
+
+    private String email;
+
     private Long roomId;
 
     private Integer floor;

@@ -6,7 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.jackson.JacksonAutoConfiguration;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 
-@SpringBootApplication(exclude = {JacksonAutoConfiguration.class}, scanBasePackages = "com.example")
+@SpringBootApplication(exclude = {JacksonAutoConfiguration.class}, scanBasePackages = {"com.example", "com.example.config"})
 @EnableDiscoveryClient
 @MapperScan("com.example.mapper")
 public class FaceServiceApplication {

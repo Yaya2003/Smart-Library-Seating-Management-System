@@ -69,4 +69,28 @@ public class Reservation {
     private Date createAt;
     @TableField("updated_at")
     private Date updateAt;
+
+    /**
+     * 以下字段为管理端查询过滤使用，不直接映射数据库列
+     */
+    @TableField(exist = false)
+    private Integer age;
+
+    @TableField(exist = false)
+    private String gender;
+
+    @TableField(exist = false)
+    private String className;
+
+    /**
+     * 学院（用户所属院系/部门）
+     */
+    @TableField(exist = false)
+    private String department;
+
+    @TableField(exist = false)
+    private String phone;
+
+    @TableField(exist = false)
+    private String email;
 }

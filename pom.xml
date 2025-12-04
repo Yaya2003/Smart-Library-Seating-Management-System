@@ -69,6 +69,7 @@
 		<module>user-service</module>
 		<module>room-service</module>
 		<module>reservation-service</module>
+		<module>statistics-service</module>
 		<module>gateway-service</module>
 		<module>eureka-server</module>
 		<module>face-service</module>
