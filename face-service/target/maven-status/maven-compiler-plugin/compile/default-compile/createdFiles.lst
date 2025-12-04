@@ -1,0 +1,14 @@
+com\example\client\FaceppClient$FaceppCompareResult.class
+com\example\client\FaceppClient.class
+com\example\websocket\RecognizeWebSocketHandler$WsResponse.class
+com\example\config\SecurityConfig.class
+com\example\config\FaceppProperties.class
+com\example\service\FaceRecognitionService.class
+com\example\config\WebSocketConfig.class
+com\example\config\BaiduFaceProperties.class
+com\example\controller\FaceController.class
+com\example\domain\vo\RecognitionResult.class
+com\example\config\WebSocketContainerConfig.class
+com\example\domain\dto\FaceRegisterDTO.class
+com\example\websocket\RecognizeWebSocketHandler.class
+com\example\service\impl\FaceRecognitionServiceImpl.class

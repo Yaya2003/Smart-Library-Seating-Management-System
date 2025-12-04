@@ -1,0 +1,8 @@
+com\example\statistics\dto\TrendPointDTO.class
+com\example\statistics\service\impl\StatisticsServiceImpl.class
+com\example\statistics\dto\OverviewStatisticsDTO.class
+com\example\mapper\UserMapper.class
+com\example\StatisticsServiceApplication.class
+com\example\controller\StatisticsController.class
+com\example\statistics\service\StatisticsService.class
+com\example\mapper\ReservationMapper.class

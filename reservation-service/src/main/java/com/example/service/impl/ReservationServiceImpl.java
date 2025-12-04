@@ -200,6 +200,9 @@ public class ReservationServiceImpl extends ServiceImpl<ReservationMapper, Reser
                 (userSession.getRoles().contains("R_ADMIN")
                         || userSession.getRoles().contains("R_TEACHER")
                         || userSession.getRoles().contains("R_SUPER"));
+        if (!isAdmin && !hasRecentFaceRecognition(userSession.getUserId())) {
+            throw new IllegalStateException("请先通过人脸识别再进行签到入座");
+        }
 
         Seat seat = seatMapper.selectById(seatId);
         if (seat == null || !Objects.equals(seat.getStatus(), 1)) {
@@ -601,6 +604,13 @@ public class ReservationServiceImpl extends ServiceImpl<ReservationMapper, Reser
         }
 
         Long userId = userSession.getUserId();
+        boolean isAdmin = userSession.getRoles() != null &&
+                (userSession.getRoles().contains("R_ADMIN")
+                        || userSession.getRoles().contains("R_TEACHER")
+                        || userSession.getRoles().contains("R_SUPER"));
+        if (!isAdmin && !hasRecentFaceRecognition(userId)) {
+            throw new IllegalStateException("请先通过人脸识别再进行入座");
+        }
 
         // 计算当前所属时间段
         LocalDateTime now = LocalDateTime.now();
@@ -696,6 +706,27 @@ public class ReservationServiceImpl extends ServiceImpl<ReservationMapper, Reser
             user.setBanUntil(Date.from(banUntil.atZone(ZoneId.systemDefault()).toInstant()));
         }
         userMapper.updateById(user);
+    }
+
+    /**
+     * 校验用户最近是否通过过一次人脸识别（用于普通用户签到 / 即时入座前置校验）
+     */
+    private boolean hasRecentFaceRecognition(Long userId) {
+        if (userId == null) {
+            return false;
+        }
+        LocalDateTime threshold = LocalDateTime.now().minusMinutes(2);
+        Date thresholdDate = Date.from(threshold.atZone(ZoneId.systemDefault()).toInstant());
+
+        FaceRecognitionLog log = faceRecognitionLogMapper.selectOne(
+                new LambdaQueryWrapper<FaceRecognitionLog>()
+                        .eq(FaceRecognitionLog::getUserId, userId)
+                        .eq(FaceRecognitionLog::getMatched, 1)
+                        .ge(FaceRecognitionLog::getCreatedAt, thresholdDate)
+                        .orderByDesc(FaceRecognitionLog::getCreatedAt)
+                        .last("limit 1")
+        );
+        return log != null;
     }
 
     /**
