@@ -1,8 +1,14 @@
+F:\tushuguan\facial-recognition-backend-cloud\statistics-service\src\main\java\com\example\statistics\dto\RoomUsageRankDTO.java
 F:\tushuguan\facial-recognition-backend-cloud\statistics-service\src\main\java\com\example\statistics\service\StatisticsService.java
+F:\tushuguan\facial-recognition-backend-cloud\statistics-service\src\main\java\com\example\statistics\dto\CheckinConversionDTO.java
+F:\tushuguan\facial-recognition-backend-cloud\statistics-service\src\main\java\com\example\statistics\dto\RoomTimeSlotHeatDTO.java
+F:\tushuguan\facial-recognition-backend-cloud\statistics-service\src\main\java\com\example\controller\StatisticsController.java
+F:\tushuguan\facial-recognition-backend-cloud\statistics-service\src\main\java\com\example\mapper\ReservationMapper.java
+F:\tushuguan\facial-recognition-backend-cloud\statistics-service\src\main\java\com\example\statistics\dto\DeptClassStatisticsDTO.java
+F:\tushuguan\facial-recognition-backend-cloud\statistics-service\src\main\java\com\example\statistics\dto\SeatUsageDTO.java
+F:\tushuguan\facial-recognition-backend-cloud\statistics-service\src\main\java\com\example\statistics\dto\ViolationCancelTrendDTO.java
 F:\tushuguan\facial-recognition-backend-cloud\statistics-service\src\main\java\com\example\statistics\service\impl\StatisticsServiceImpl.java
 F:\tushuguan\facial-recognition-backend-cloud\statistics-service\src\main\java\com\example\statistics\dto\OverviewStatisticsDTO.java
-F:\tushuguan\facial-recognition-backend-cloud\statistics-service\src\main\java\com\example\controller\StatisticsController.java
 F:\tushuguan\facial-recognition-backend-cloud\statistics-service\src\main\java\com\example\mapper\UserMapper.java
 F:\tushuguan\facial-recognition-backend-cloud\statistics-service\src\main\java\com\example\StatisticsServiceApplication.java
-F:\tushuguan\facial-recognition-backend-cloud\statistics-service\src\main\java\com\example\mapper\ReservationMapper.java
 F:\tushuguan\facial-recognition-backend-cloud\statistics-service\src\main\java\com\example\statistics\dto\TrendPointDTO.java

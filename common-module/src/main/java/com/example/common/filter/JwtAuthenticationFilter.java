@@ -36,6 +36,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/auth/loginByUserId",
             "/auth/loginByEmailCode",
             "/auth/sendEmailCode",
+            "/auth/resetPasswordByEmail",
             "/register",
             "/login",
             "/logout",

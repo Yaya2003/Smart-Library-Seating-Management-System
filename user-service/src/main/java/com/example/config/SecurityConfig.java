@@ -53,6 +53,7 @@ public class SecurityConfig {
                                 "/loginByUserId",
                                 "/sendEmailCode",
                                 "/refresh",
+                                "/auth/resetPasswordByEmail",
                                 "/logout",
                                 "/systemManage/template/**"
                         ).permitAll()
