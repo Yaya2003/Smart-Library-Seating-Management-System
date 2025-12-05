@@ -104,19 +104,19 @@ public class UserController {
     public ResultView<?> login(@RequestBody @Valid UserLoginDTO userLoginDTO) {
         User loginUser = userService.getById(userLoginDTO.getUserId());
         if (loginUser == null) {
-            return ResultView.error(HttpStatus.BAD_REQUEST.value(), "The id is not exits");
+            return ResultView.error(HttpStatus.BAD_REQUEST.value(), "用户id不存在");
         }
 
         if (Objects.equals(loginUser.getState(), "2")) {
-            return ResultView.error(HttpStatus.BAD_REQUEST.value(), "The user is locked");
+            return ResultView.error(HttpStatus.BAD_REQUEST.value(), "该用户已被锁定");
         }
 
         if (!userLoginDTO.getUserName().equals(loginUser.getUserName())) {
-            return ResultView.error(HttpStatus.BAD_REQUEST.value(), "The userName is not exits");
+            return ResultView.error(HttpStatus.BAD_REQUEST.value(), "用户名不存在");
         }
 
         if (!passwordEncoder.matches(userLoginDTO.getPassword(), loginUser.getPassword())) {
-            return ResultView.error(HttpStatus.BAD_REQUEST.value(), "The password is not correct");
+            return ResultView.error(HttpStatus.BAD_REQUEST.value(), "密码错误");
         }
 
         Map<String, Object> claims = new HashMap<>();

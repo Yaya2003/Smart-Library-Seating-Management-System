@@ -71,20 +71,26 @@ public class StatisticsServiceImpl implements StatisticsService {
         String dateStr = date.toString();
         List<TrendPointDTO> result = new ArrayList<>();
 
-        // 按时间段统计：每两个小时一个点
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("HH:mm");
-        for (int hour = 8; hour <= 22; hour += 2) {
-            LocalTime start = LocalTime.of(hour, 0);
-            LocalTime end = start.plusHours(2);
+        // 改为按预约的时间段统计（上午/下午/晚上），而不是按下单时间
+        long morning = reservationMapper.selectCount(
+                new LambdaQueryWrapper<Reservation>()
+                        .eq(Reservation::getDate, dateStr)
+                        .eq(Reservation::getTimeSlot, "MORNING")
+        );
+        long afternoon = reservationMapper.selectCount(
+                new LambdaQueryWrapper<Reservation>()
+                        .eq(Reservation::getDate, dateStr)
+                        .eq(Reservation::getTimeSlot, "AFTERNOON")
+        );
+        long evening = reservationMapper.selectCount(
+                new LambdaQueryWrapper<Reservation>()
+                        .eq(Reservation::getDate, dateStr)
+                        .eq(Reservation::getTimeSlot, "EVENING")
+        );
 
-            LocalDateTime startDateTime = LocalDateTime.of(date, start);
-            LocalDateTime endDateTime = LocalDateTime.of(date, end);
-
-            long count = reservationMapper.countByCreatedAtBetween(dateStr, startDateTime, endDateTime);
-
-            String label = start.format(formatter);
-            result.add(new TrendPointDTO(label, count));
-        }
+        result.add(new TrendPointDTO("上午", morning));
+        result.add(new TrendPointDTO("下午", afternoon));
+        result.add(new TrendPointDTO("晚上", evening));
 
         return result;
     }
@@ -117,4 +123,3 @@ public class StatisticsServiceImpl implements StatisticsService {
         return result;
     }
 }
-
