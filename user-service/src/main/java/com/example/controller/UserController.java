@@ -293,6 +293,7 @@ public class UserController {
                                      @RequestParam(required = false) Long collegeId,
                                      @RequestParam(required = false) Long classId,
                                      @RequestParam(required = false) String role,
+                                     @RequestParam(required = false) Integer faceInfo,
                                      @RequestParam(required = false) String state) {
 
         UserSession userSession = (UserSession) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
@@ -308,7 +309,8 @@ public class UserController {
                 .eq(collegeId != null, User::getCollegeId, collegeId)
                 .eq(classId != null, User::getClassId, classId)
                 .like(role != null, User::getRoles, role)
-                .eq(state != null, User::getState, state);
+                .eq(state != null, User::getState, state)
+                .eq(faceInfo != null, User::getFaceInfo, faceInfo);
 
         // 根据用户角色设置不同的过滤条件
         if (roles.contains("R_SUPER")) {
