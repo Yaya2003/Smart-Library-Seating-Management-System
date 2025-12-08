@@ -1,0 +1,42 @@
+spring:
+  application:
+    name: face-service
+  mvc:
+    throw-exception-if-no-handler-found: true
+    converters:
+      preferred-json-mapper: gson
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/library_db
+    username: root
+    password: 123456
+  gson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    enable-complex-map-key-serialization: true
+    serialize-nulls: true
+  cloud:
+    nacos:
+      discovery:
+        server-addr: localhost:8848
+        username: nacos
+        password: nacos
+        namespace: tushuguan
+        naming-load-cache-at-start: true
+    sentinel:
+      transport:
+        dashboard: localhost:8080
+        port: 8719
+
+server:
+  port: 8000
+
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+baidu:
+  face:
+    api-key: JiUIDCHjpAfjBteFZo45lvwI
+    api-secret: qB7z8gsD3J1H5Bag9lmZU4PJy9YiLEwD
+    group-id: library_users
+    match-threshold: 80

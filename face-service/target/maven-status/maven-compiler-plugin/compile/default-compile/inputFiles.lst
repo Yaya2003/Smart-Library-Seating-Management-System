@@ -1,0 +1,14 @@
+F:\tushuguan\facial-recognition-backend-cloud\face-service\src\main\java\com\example\client\BaiduFaceClient.java
+F:\tushuguan\facial-recognition-backend-cloud\face-service\src\main\java\com\example\config\WebSocketConfig.java
+F:\tushuguan\facial-recognition-backend-cloud\face-service\src\main\java\com\example\FaceServiceApplication.java
+F:\tushuguan\facial-recognition-backend-cloud\face-service\src\main\java\com\example\client\FaceppClient.java
+F:\tushuguan\facial-recognition-backend-cloud\face-service\src\main\java\com\example\config\FaceppProperties.java
+F:\tushuguan\facial-recognition-backend-cloud\face-service\src\main\java\com\example\service\FaceRecognitionService.java
+F:\tushuguan\facial-recognition-backend-cloud\face-service\src\main\java\com\example\config\WebSocketContainerConfig.java
+F:\tushuguan\facial-recognition-backend-cloud\face-service\src\main\java\com\example\websocket\RecognizeWebSocketHandler.java
+F:\tushuguan\facial-recognition-backend-cloud\face-service\src\main\java\com\example\config\BaiduFaceProperties.java
+F:\tushuguan\facial-recognition-backend-cloud\face-service\src\main\java\com\example\service\impl\FaceRecognitionServiceImpl.java
+F:\tushuguan\facial-recognition-backend-cloud\face-service\src\main\java\com\example\controller\FaceController.java
+F:\tushuguan\facial-recognition-backend-cloud\face-service\src\main\java\com\example\config\SecurityConfig.java
+F:\tushuguan\facial-recognition-backend-cloud\face-service\src\main\java\com\example\domain\vo\RecognitionResult.java
+F:\tushuguan\facial-recognition-backend-cloud\face-service\src\main\java\com\example\domain\dto\FaceRegisterDTO.java
